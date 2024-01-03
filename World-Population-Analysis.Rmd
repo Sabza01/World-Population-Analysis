@@ -1,0 +1,229 @@
+---
+title: "World-Population-Analysis"
+author: "Sabelo Zwane"
+date: "2023-12-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Read the data files
+```{r}
+w_data <- read.csv('World_pop_data_2023-11-14 11_56_30.csv')
+head(w_data)
+```
+## Open the second data file
+```{r}
+metadata <- read.csv('country_metadata_2023-11-14 11_59_06.csv')
+head(metadata)
+```
+
+## Check out the column names of the fisrt file
+```{r}
+colnames(w_data)
+```
+
+
+## Check out the column names of the second file
+```{r}
+colnames(metadata)
+```
+
+## We need to select the columns we want only
+```{r}
+new_w_data <- w_data[c(-2,-3)]
+new_metadata <- metadata[c(-4)]
+```
+
+## We want to join the two data frames using the merge function from the dyplr package
+## load the dyplr package 
+```{r}
+library(dplyr)
+```
+
+```{r}
+pop_data <- merge(x = new_metadata, y = new_w_data, by = "Country.Code")
+```
+
+##Rename Column four to Country
+```{r}
+colnames(pop_data)[4] <- "CountryName"
+```
+
+## Clean the data and Check rows with null values.
+```{r}
+any(is.null(pop_data))
+```
+
+## The null values are coded as "null" so they do not show up when 
+## applying the function.
+## We find the rows that contain the value "null" a different way.
+```{r}
+null_values <- pop_data%>%filter_all(any_vars(.%in%c('null')))
+```
+
+## Remove the rows with the null values in region as these are not countries
+```{r}
+pop_data <- subset(pop_data, Region!="null")
+head(pop_data)
+```
+
+## Stack the columns of the different years. This can also be achieved using the melt() function
+## Bind the first four columns
+## Stack the rest of the columns
+```{r}
+stacked_pop_data <- cbind(pop_data[1:4], stack(pop_data[5:65]))
+```
+
+
+## Remove the X on the Years data
+```{r}
+stacked_pop_data$ind <- substr(stacked_pop_data$ind, 2, 5)
+```
+
+
+## Change the column heading from ind to Year
+```{r}
+colnames(stacked_pop_data)[6] <- 'Year'
+```
+
+## Check the structure of the dataframe
+```{r}
+str(stacked_pop_data)
+```
+
+## Change the data type of Year from string to number
+```{r}
+stacked_pop_data$Year <- as.numeric(stacked_pop_data$Year)
+```
+
+## Create a date column Using lubridate
+```{r}
+library(lubridate)
+stacked_pop_data$Date <- ymd(stacked_pop_data$Year, truncated = 2L)
+head(stacked_pop_data)
+```
+
+## Check the structure of the dataframe again
+```{r}
+str(stacked_pop_data)
+```
+
+## We can Output the data frame as csv
+## write.csv(stacked_pop_data , "C:\\Users\\Sabelo\\Documents\\Grad School\\GIES\\MSBA\\Learning\\Word Population Project\\WorldPop\\Population_data.csv", row.names=FALSE)
+
+## Scale the population values for more clear presentation and check for null values
+```{r}
+stacked_pop_data$values <- stacked_pop_data$values/1000000
+stacked_pop_data <- na.omit(stacked_pop_data)
+sum(is.na(stacked_pop_data))
+head(stacked_pop_data)
+```
+
+
+## Now that we cleaned the data, we can do some analysis
+
+## load ggplot package for graphing
+```{r}
+library(ggplot2)
+```
+
+## Plot a line graph to show changes to population for the chosen country
+```{r}
+ggplot(filter(stacked_pop_data, CountryName=='United States'), 
+  aes(x=Date, y=values)) + 
+    geom_line() + 
+      ggtitle("United States Population Growth from 1960-2020") +
+        xlab("Time (in Years)") +
+          ylab("Population in Millions")
+```
+
+## Plot a line graph to show changes to population for the chosen countries
+```{r}
+ggplot(filter(stacked_pop_data, CountryName %in% c("United States",   "China", "India")), mapping=aes(x=Date, y=values,      group=CountryName, color=CountryName)) + 
+  geom_line() + 
+    scale_colour_manual("", 
+              breaks = c("United States", "China", "India"),
+              values = c("blue", "red", "green")) +
+  ggtitle("Comparison of Population Changes of United States, China 
+                  and India from 1960-2020") +
+              xlab("Time (in Years)") +
+                ylab("Population in Millions")
+```
+
+## How did the population in different parts of the world change over time?
+## we will use the stat_summary function and specify geom="line"
+```{r}
+ggplot(stacked_pop_data, mapping=aes(x=Date, y=values, color=Region, group=Region)) + 
+         stat_summary(fun=sum, geom = "line") +
+  ggtitle("Comparison of Population Changes in different
+          regions of the world from 1960-2020") +
+    xlab("Time (in Years)") +
+      ylab("Population in Millions")
+```
+
+## Which country or countries have experienced the highest increase/decrease in population over time?
+```{r}
+new_d<- stacked_pop_data %>%
+  group_by(CountryName) %>%
+  mutate(lagged_values = values - lag(values,1))
+head(new_d)
+
+new_d %>% 
+  filter(Date>="1961-01-01") %>%
+  group_by(CountryName) %>%
+  summarise(sum_diff=sum(lagged_values, na.rm=T)) %>%
+    arrange(desc(sum_diff)) %>%
+    slice_head(n=5)
+
+new_d %>% 
+  filter(Date>="1961-01-01") %>%
+  group_by(CountryName) %>%
+  summarise(sum_diff=sum(lagged_values, na.rm=T)) %>%
+  arrange(desc(sum_diff)) %>%
+  slice_tail(n=5)
+```
+
+## Which country or countries have been experiencing the highest increase/decrease in population in the last five (or ten) years?
+```{r}
+new_d %>% 
+  filter(Date>="2015-01-01") %>%
+  group_by(CountryName) %>%
+  summarise(sum_diff=sum(lagged_values, na.rm=T)) %>%
+  arrange(desc(sum_diff)) %>%
+  slice_head(n=5)
+
+new_d %>% 
+  filter(Date>="2015-01-01") %>%
+  group_by(CountryName) %>%
+  summarise(sum_diff=sum(lagged_values, na.rm=T)) %>%
+  arrange(desc(sum_diff)) %>%
+  slice_tail(n=5)
+```
+
+## How many people were born in your country (or any other country) during your birth year?
+```{r}
+new_d %>%
+  filter(Date=="1994-01-01") %>%
+  filter(CountryName=="Eswatini") %>%
+  group_by(CountryName) %>%
+  summarise(num_born=mean(lagged_values, na.rm=T)*1000000)
+```
+
+## It was realized that there are some null coded entries in the income group column. Remove null entries
+```{r}
+stacked_pop_data <- subset(stacked_pop_data, IncomeGroup!="null")
+```
+
+
+## How does income group affect a country's population growth?
+```{r}
+ggplot(stacked_pop_data, mapping=aes(x=Date, y=values, color=IncomeGroup, group=IncomeGroup)) + 
+  stat_summary(fun=sum, geom = "line") +
+  ggtitle("Comparison of Population Changes in different country
+          income groups from 1960-2020") +
+  xlab("Time (in Years)") +
+  ylab("Population in Millions")
+```
